@@ -281,17 +281,13 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-<<<<<<< HEAD
-	  HAL_Delay(100);
-=======
 	  measure_f = meas_dist();
 	  if (measure_f <=0.04){
 		  TIM3->CCR1=1500-1;
 	  } else{
 		  TIM3->CCR1=2500-1;
 	  }
-      HAL_Delay(80);
->>>>>>> refs/remotes/origin/Sensor_Dev
+      HAL_Delay(100);
 
     /* USER CODE BEGIN 3 */
   }
