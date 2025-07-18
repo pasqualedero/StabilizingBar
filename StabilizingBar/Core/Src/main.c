@@ -287,7 +287,7 @@ int main(void)
 	  } else{
 		  TIM3->CCR1=2500-1;
 	  }
-      HAL_Delay(100);
+      HAL_Delay(80);
 
     /* USER CODE BEGIN 3 */
   }
