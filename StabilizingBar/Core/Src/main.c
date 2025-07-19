@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "pid.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,50 +64,8 @@ static void MX_USART2_UART_Init(void);
   * @retval int
   */
 #include <math.h>
-#define ADC_FS 3.3
-
-volatile uint16_t voltage = 0;
-volatile float voltage_f = 0;
-uint16_t dutyc = 0;
-void ADC_IRQHandler() {
-	if(((ADC1->SR >> ADC_SR_EOC_Pos) & 0x01)) {
-		voltage = (uint16_t)ADC1->DR;
-		voltage_f = voltage*(ADC_FS/pow(2, 12));
-		dutyc = 500 + (voltage * 2000) / 4095;
-		ADC1->CR2 |= (0x1 << ADC_CR2_SWSTART_Pos);
-	}
-}
-
-void ADC_Init() {
-	/* GPIO Configuration */
-	// Provide clock to PORTA (PA_0 and PA_1 are associated to CH0 and CH1)
-	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOAEN_Pos); 	// Clock to GPIOA
-
-	// Set both GPIOs in Analog mode
-	GPIOA->MODER |= (3 << GPIO_MODER_MODE0_Pos);		// Set PA0 in Analog mode
-
-	/* ADC Configuration */
-	// Provide clock to ADC1
-	RCC->APB2ENR |= (1 << RCC_APB2ENR_ADC1EN_Pos); 	// Clock to ADC1
 
 
-	ADC1->CR2 	|= (0x01 << ADC_CR2_ADON_Pos);			// (ADON) Power On ADC1
-	ADC1->CR2 	&= ~(0x01 << ADC_CR2_CONT_Pos);			// (CONT) Single Conversion Mode
-	ADC1->SQR3 	&= ~(0x1F << 0);						// Clear before Selection of Channel 0
-	ADC1->SQR3 	|= (0x00 << 0);							// Selection of Channel 0
-	ADC1->CR1 	&= ~(0x1 << ADC_CR1_SCAN_Pos); 			// (SCAN) Disable Scan Mode
-	ADC1->CR1 	&= ~(0x1 << ADC_CR1_DISCEN_Pos); 		// (DISCEN) Disable Discontinuous Mode
-	ADC1->CR1 	&= ~(0x07 << ADC_CR1_DISCNUM_Pos);		// (DISCNUM) Clear Number of Discontinuous Channels
-	ADC1->CR2 	&= ~(0x1 << ADC_CR2_ALIGN_Pos); 	// (ALIGN) Align right
-	ADC1->SMPR2 	&= ~(0x0F << ADC_SMPR2_SMP0_Pos);		// Set 3 Cycles per Samples
-	ADC1->CR1 	&= ~(0x03 << ADC_CR1_RES_Pos);			// 12 Bit resolution
-	ADC1->CR2 	|= (0x01 << ADC_CR2_EOCS_Pos); 			// (EOCS) Notify when each conversion of a sequence is complete
-	ADC1 ->CR1 	|= (0x01 << ADC_CR1_EOCIE_Pos); 		// (EOCIE) Generate an interrupt every time EOC is set
-
-	NVIC_EnableIRQ(ADC_IRQn); 		// Check file stm32f446xx.h for the name definition
-	NVIC_SetPriority(ADC_IRQn, 0); 	// Priority
-	ADC1->CR2 |= (0x1 << ADC_CR2_SWSTART_Pos);
-}
 void TIM3_PWM_setup() {
 	/* GPIO SetUp (PA6 -> TIM3_CH1) */
 	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOAEN_Pos);		// Enable GPIO6
@@ -150,6 +108,9 @@ void TIM6_DAC_IRQHandler() {
 	}
 }
 
+/*
+ * Misuro il valore di ECHO del sensore
+ */
 uint8_t measure_collected = 0;
 uint32_t measure = 0;
 void EXTI1_IRQHandler() {
@@ -270,24 +231,37 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+
   //setup servo motor
   TIM3_PWM_setup();
   ADC_Init();
+
   //setup ultrasound sensor
   hc_sr04_init();
+
+  /* PID tuning and initialization START */
+
+  float tc = 0.07; // 70ms
+  float kp = 0.8f;    // moderate proportional
+  float ti = 1.0f;    // 1s integral time → removes steady-state error in a few seconds
+  float td = 0.001f;    // 1ms derivative time → gentle slope damping
+  float N  = 10.0f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
+  float tw = ti;      // back-calc time constant ≃ Ti (you can also try Ti/10)
+  float u_min = 440.0f;  // PWM min
+  float u_max = 2440.0f;  // PWM max (assuming you scale 0…1 → 0…100% duty)
+
+  Pid_s *pid = pid_create(tc, kp, ti, td, N, u_min, u_max, tw);
+
+  /* PID tuning and initialization END */
 
   TIM3->CR1 |= (1 << TIM_CR1_CEN_Pos);
 
   while (1)
   {
     /* USER CODE END WHILE */
-	  measure_f = meas_dist();
-	  if (measure_f <=0.04){
-		  TIM3->CCR1=1500-1;
-	  } else{
-		  TIM3->CCR1=2500-1;
-	  }
-      HAL_Delay(100);
+	  measure_f = meas_dist();	// take measurement
+	  uk = pid_calculate(pid, measure, 17);
+	  TIM3->CCR1 = uk;
 
     /* USER CODE BEGIN 3 */
   }
