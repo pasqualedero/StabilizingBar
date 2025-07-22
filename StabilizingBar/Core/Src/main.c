@@ -204,8 +204,98 @@ float meas_dist() {
 	                            // legge per quanto tempo echo è stato alto
 	return 0.5*0.000343*measure;// return measurement (twice speed of sound times echo rise time (measure))
 }
-float measure_f;
 
+/*
+ * ADC configuration
+ */
+
+void ADC_init(){
+	// Set GPIOA
+	 RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOAEN_Pos); 	// Clock to GPIOA
+	 GPIOA->MODER |= (3 << GPIO_MODER_MODE0_Pos);		// Set PA0 in Analog mode - P
+	 GPIOA->MODER |= (3 << GPIO_MODER_MODE1_Pos);		// Set PA1 in Analog mode - I
+	 GPIOA->MODER |= (3 << GPIO_MODER_MODE4_Pos);		// Set PA4 in Analog mode - D
+
+	 // ADC configuration
+	 RCC->APB2ENR |= (1 << RCC_APB2ENR_ADC1EN_Pos);		// enable clock for ADC1
+	 ADC1->CR2 	|= (0x01 << ADC_CR2_ADON_Pos);			// (ADON) Power On ADC1
+	 ADC1->CR2 	&= ~(0x01 << ADC_CR2_CONT_Pos);			// (CONT) Single Conversion Mode
+
+	 // Specify conversion sequence
+
+	 ADC1->SQR3 	&= ~(0x1F << 0);						// Clear before Selection of Channel 0
+	 ADC1->SQR3 	|= (0x00 << 0);							// Selection of Channel 0
+
+	 ADC1->SQR3 	&= ~(0x1F << 5);						// Clear before Selection of Channel 1
+     ADC1->SQR3 	|= (0x01 << 5);							// Selection of Channel 1
+
+     ADC1->SQR3 	&= ~(0x1F << 10);						// Clear before Selection of Channel 4
+     ADC1->SQR3 	|= (0x04 << 10);						// Selection of Channel 4
+
+
+     ADC1->SQR1    |= (0x02 << ADC_SQR1_L_Pos);  			// Specify the number of channels to sample
+
+     ADC1->CR1 	|= (0x1 << ADC_CR1_SCAN_Pos); 			// (SCAN) Enable Scan Mode
+     ADC1->CR1 	&= ~(0x1 << ADC_CR1_DISCEN_Pos); 		// (DISCEN) Disable Discontinuous Mode
+     ADC1->CR1 	&= ~(0x07 << ADC_CR1_DISCNUM_Pos);		// (DISCNUM) Clear Number of Discontinuous Channels
+     ADC1->CR2 	&= ~(0x1 << ADC_CR2_ALIGN_Pos); 		// (ALIGN) Align right
+
+     // Sample time for channels 1 to 3 in our case
+     ADC1->SMPR2 	&= ~(0x07 << ADC_SMPR2_SMP0_Pos);		// Clear cycles for Channel0
+     ADC1->SMPR2 	|= (0x06 << ADC_SMPR2_SMP0_Pos);		// Set 480 Cycles per Samples
+
+     ADC1->SMPR2 	&= ~(0x07 << ADC_SMPR2_SMP1_Pos);		// Clear cycles for Channel1
+     ADC1->SMPR2 	|= (0x06 << ADC_SMPR2_SMP1_Pos);		// Set 480 Cycles per Samples
+
+     ADC1->SMPR2 	&= ~(0x07 << ADC_SMPR2_SMP4_Pos);		// Clear cycles for Channel4
+     ADC1->SMPR2 	|= (0x06 << ADC_SMPR2_SMP4_Pos);		// Set 480 Cycles per Samples
+
+     // Resolution of ADC1
+     ADC1->CR1 	&= ~(0x03 << ADC_CR1_RES_Pos);			// 12 Bit resolution
+
+     ADC1->CR2 	|= (0x01 << ADC_CR2_EOCS_Pos); 			// (EOCS) Notify when each conversion of a sequence is complete (a flag)
+     ADC1 ->CR1 	|= (0x01 << ADC_CR1_EOCIE_Pos); 	// (EOCIE) Generate an interrupt every time EOC is set
+
+   	 NVIC_EnableIRQ(ADC_IRQn); 							// Check file stm32f446xx.h for the name definition
+   	 NVIC_SetPriority(ADC_IRQn, 0); 						// Priority
+   	 ADC1->CR2 |= (0x1 << ADC_CR2_SWSTART_Pos);			// Start conversion
+}
+
+volatile uint8_t channel = 0;
+volatile uint16_t kp_adc, ki_adc, kd_adc;
+volatile uint16_t kp_adc_prec, ki_adc_prec, kd_adc_prec;
+float alpha = 0.05;
+float kp_f,ki_f,kd_f;
+void ADC_IRQHandler() {
+	if(((ADC1->SR >> ADC_SR_EOC_Pos) & 0x01)) {
+		switch (channel) { 								// Select channel
+		case 0:
+			kp_adc = (uint16_t)ADC1->DR;				// P
+			kp_f = alpha*(float)kp_adc + (1-alpha)*kp_adc_prec;
+			kp_adc_prec = (uint16_t) kp_f;
+			break;
+		case 1:
+			ki_adc = (uint16_t)ADC1->DR;				// I
+			ki_f = alpha*(float)ki_adc + (1-alpha)*ki_adc_prec;
+			ki_adc_prec = (uint16_t) ki_f;
+			break;
+		case 2:
+			kd_adc = (uint16_t)ADC1->DR;				// D
+			kd_f = alpha*(float)kd_adc + (1-alpha)*kd_adc_prec;
+			kd_adc_prec = (uint16_t) kd_f;
+			ADC1->CR2 |= (0x1 << ADC_CR2_SWSTART_Pos); 	// Single conversion, restart at the end of group
+			break;
+		}
+		channel ++; 					// Swap between channels
+		if (channel >= 3){
+			channel = 0;
+		}
+	}
+}
+
+
+
+float measure_f;
 float uk;
 float reference;
 float pwm;
@@ -242,6 +332,9 @@ int main(void)
 
   //setup ultrasound sensor
   hc_sr04_init();
+
+  // ADC
+  ADC_init();
 
   /* PID tuning and initialization START */
 
