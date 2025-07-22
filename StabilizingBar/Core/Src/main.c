@@ -208,6 +208,7 @@ float measure_f;
 
 float uk;
 float reference;
+float pwm;
 
 int main(void)
 {
@@ -245,28 +246,35 @@ int main(void)
   /* PID tuning and initialization START */
 
   float tc = 0.07; // 70ms
-  float kp = 0.8f;    // moderate proportional
-  float ti = 2.0f;    // 1s integral time → removes steady-state error in a few seconds
-  float td = 0.001f;    // 1ms derivative time → gentle slope damping
-  float N  = 10.0f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
+  float kp = -6.3f;    // moderate proportional
+  float ti = 42.0f;    // 1s integral time → removes steady-state error in a few seconds
+  float td = 1.16f;    // 1ms derivative time → gentle slope damping
+  float N  = 2.8f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
   float tw = ti;      // back-calc time constant ≃ Ti (you can also try Ti/10)
-  float u_min = 720.0f;  // PWM min
-  float u_max = 2160.0f;  // PWM max (assuming you scale from -65° to 65° which is servo angle )
+  float u_min = -65.0f;  // PWM min 720 -> 2160
+  float u_max = 65.0f;  // PWM max (assuming you scale from -65° to 65° which is servo angle )
 
   Pid_s *pid = pid_create(tc, kp, ti, td, N, u_min, u_max, tw);
 
   /* PID tuning and initialization END */
 
   TIM3->CR1 |= (1 << TIM_CR1_CEN_Pos);
-
   reference = 0.17; // in meters -> 17 cm
+
+  /*
+   * Set bar angle at 0°
+   */
+
+  TIM3->CCR1 = horizontal -1;
+
   while (1)
   {
     /* USER CODE END WHILE */
 	  measure_f = meas_dist();	// take measurement
 	  if (abs(measure_f-reference)>=0.02){
-		  uk = pid_calculate(pid, measure, reference);
-		  TIM3->CCR1 = (uint32_t) uk;
+		  uk = pid_calculate(pid, measure_f, reference);
+		  pwm = ((uk + 90) / 180) * 1440 + 720;
+		  TIM3->CCR1 = (uint32_t) pwm;
 	  }
 	  HAL_Delay(60);
 
