@@ -35,7 +35,7 @@ float pid_calculate(Pid_s *pid, float measure, float reference)
 {
     /* 1) Error:
        e[k] = r[k] – y[k] */
-    float e_k = -reference + measure;
+    float e_k = reference - measure;
 
     /* 2) Filtered derivative:
        a = T_d / (N·T_c)

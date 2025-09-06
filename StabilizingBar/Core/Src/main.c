@@ -41,7 +41,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart2;
-static const uint32_t horizontal = 1440; // horizontal position servo motor
+static const uint32_t horizontal = 1440; // horizontal position servo-motor
 
 /* USER CODE BEGIN PV */
 
@@ -192,6 +192,11 @@ void clear_triger() {
 	GPIOC->ODR &= ~(1 << 0);//abbassa il segnale di trigger
 }
 
+float measure_f_prov;
+float beta = 0.3f;
+float measure_filtered;
+int flag = 1;
+float measure_f_prec;
 float meas_dist() {
 	clear_triger(); 	// keep trigger low
 	delay_micro_s(3);	// for at least 3 mu_s
@@ -202,7 +207,20 @@ float meas_dist() {
 
 	while(!measure_collected);	// wait for measurement to be collected (look EXTI ISR) finche non
 	                            // legge per quanto tempo echo è stato alto
-	return 0.5*0.000343*measure;// return measurement (twice speed of sound times echo rise time (measure))
+	measure_f_prov = -0.5*0.000343*measure;		// return measurement (twice speed of sound times echo rise time (measure))
+
+	if (flag){
+		measure_f_prec = measure_f_prov;
+		flag--;
+		return measure_f_prov;
+	}
+
+	measure_filtered = measure_f_prov * beta + measure_f_prec * (1-beta); // implement Weight. Mov. Avg. Filter
+
+	measure_f_prec = measure_filtered; // for next time
+
+	return measure_filtered;
+
 }
 
 /*
@@ -294,7 +312,6 @@ void ADC_IRQHandler() {
 }
 
 
-
 float measure_f;
 float uk;
 float reference;
@@ -338,11 +355,11 @@ int main(void)
 
   /* PID tuning and initialization START */
 
-  float tc = 0.07; // 70ms
-  float kp = -6.3f;    // moderate proportional
-  float ti = 42.0f;    // 1s integral time → removes steady-state error in a few seconds
-  float td = 1.16f;    // 1ms derivative time → gentle slope damping
-  float N  = 2.8f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
+  float tc = 0.09; // 70ms
+  float kp = 315.0f;    // moderate proportional
+  float ti = 0.9f;    // 1s integral time → removes steady-state error in a few seconds
+  float td = 0.9f;    // 1ms derivative time → gentle slope damping
+  float N  = 10.0f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
   float tw = ti;      // back-calc time constant ≃ Ti (you can also try Ti/10)
   float u_min = -65.0f;  // PWM min 720 -> 2160
   float u_max = 65.0f;  // PWM max (assuming you scale from -65° to 65° which is servo angle )
@@ -352,7 +369,7 @@ int main(void)
   /* PID tuning and initialization END */
 
   TIM3->CR1 |= (1 << TIM_CR1_CEN_Pos);
-  reference = 0.17; // in meters -> 17 cm
+  reference = -0.20; // in meters -> 17 cm
 
   /*
    * Set bar angle at 0°
@@ -364,7 +381,7 @@ int main(void)
   {
     /* USER CODE END WHILE */
 	  measure_f = meas_dist();	// take measurement
-	  if (abs(measure_f-reference)>=0.02){
+	  if (fabs(measure_f-reference)>=0.01){
 		  uk = pid_calculate(pid, measure_f, reference);
 		  pwm = ((uk + 90) / 180) * 1440 + 720;
 		  TIM3->CCR1 = (uint32_t) pwm;
