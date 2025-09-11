@@ -117,7 +117,7 @@ uint32_t measure = 0;
 void EXTI1_IRQHandler() {
 	NVIC_ClearPendingIRQ(EXTI1_IRQn);
 	/*se l'interrupt avviene perchè echo è 1 azzera il contatore e pone un limite alto
-	 *per evitare overflow abilitando il conteggio e cominciando a contare.*/
+	 per evitare overflow abilitando il conteggio e cominciando a contare.*/
 	if((GPIOC->IDR >> 1) & 0x01) {
 		TIM6->ARR = 65000;
 		TIM6->CNT = 0;
@@ -207,7 +207,7 @@ float meas_dist() {
 
 	while(!measure_collected);	// wait for measurement to be collected (look EXTI ISR) finche non
 	                            // legge per quanto tempo echo è stato alto
-	measure_f_prov = -0.5*0.000343*measure;		// return measurement (twice speed of sound times echo rise time (measure))
+	measure_f_prov = -0.5*0.0343*measure;		// return measurement in cm (twice speed of sound times echo rise time (measure))
 
 	if (flag){
 		measure_f_prec = measure_f_prov;
@@ -240,7 +240,7 @@ void ADC_init(){
 
     // Configure ADC parameters
     ADC1->CR2 |= (1 << ADC_CR2_CONT_Pos);               // Continuous Conversion Mode
-    ADC1->CR1 |= (0x03 << ADC_CR1_RES_Pos);             // 6-bit resolution
+    ADC1->CR1 |= (0x03 << ADC_CR1_RES_Pos);            // 12-bit resolution
     ADC1->CR2 &= ~(1 << ADC_CR2_ALIGN_Pos);             // Right alignment
 
     // Configure sequence: 1 conversion in regular sequence
@@ -268,7 +268,7 @@ volatile float reference = 0.0f;
 void ADC_IRQHandler() {
     if (ADC1->SR & ADC_SR_EOC) {
         reference_pot = (uint16_t) ADC1->DR;
-        reference = (float)reference_pot * (-LENGTH_MAX/pow(2,6))/100;
+        reference = (float)reference_pot * (-LENGTH_MAX/pow(2,6));
         ADC1->SR &= ~ADC_SR_EOC;  // Clear the interrupt flag
     }
 }
@@ -278,29 +278,15 @@ void ADC_IRQHandler() {
 float measure_f;
 float uk;
 float pwm;
-
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
   /* Configure the system clock */
   SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
@@ -318,9 +304,9 @@ int main(void)
   /* PID tuning and initialization START */
 
   float tc = 0.09; // 70ms
-  float kp = 315.0f;    // moderate proportional
-  float ti = 0.9f;    // 1s integral time → removes steady-state error in a few seconds
-  float td = 0.9f;    // 1ms derivative time → gentle slope damping
+  float kp = 3.15f;    // moderate proportional
+  float ti = 8.0f;    // 1s integral time → removes steady-state error in a few seconds
+  float td = 0.001f;    // 1ms derivative time → gentle slope damping
   float N  = 10.0f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
   float tw = ti;      // back-calc time constant ≃ Ti (you can also try Ti/10)
   float u_min = -65.0f;  // PWM min 720 -> 2160
@@ -347,19 +333,16 @@ int main(void)
 		  pwm = ((uk + 90) / 180) * 1440 + 720;
 		  TIM3->CCR1 = (uint32_t) pwm;
 	  }
-	  HAL_Delay(60);
+	  HAL_Delay(10);
 
-    /* USER CODE BEGIN 3 */
   }
-  /* USER CODE END 3 */
 }
 
 /**
   * @brief System Clock Configuration
   * @retval None
   */
-void SystemClock_Config(void)
-{
+void SystemClock_Config(void){
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -406,16 +389,7 @@ void SystemClock_Config(void)
   * @param None
   * @retval None
   */
-static void MX_USART2_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
+static void MX_USART2_UART_Init(void){
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
@@ -428,10 +402,6 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
-
 }
 
 /**
@@ -468,14 +438,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
 
-  /* USER CODE END MX_GPIO_Init_2 */
 }
 
-/* USER CODE BEGIN 4 */
 
-/* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.
