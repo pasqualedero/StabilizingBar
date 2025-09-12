@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "float.h"
+#include "lcd_i2c_simple.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "pid.h"
@@ -273,69 +274,37 @@ void ADC_IRQHandler() {
     }
 }
 
+void delay(void) {
+    for(volatile int i = 0; i < 1000000; i++);}
 
 
-float measure_f;
-float uk;
-float pwm;
-int main(void)
-{
-  /* MCU Configuration--------------------------------------------------------*/
+int main(void) {
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    MX_USART2_UART_Init();
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+    lcd_init();
 
-  /* Configure the system clock */
-  SystemClock_Config();
+    float counter = 0.0f;
+    char buffer[16];
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_USART2_UART_Init();
+    while(1) {
+        lcd_clear();
 
-  //setup servo motor
-  TIM3_PWM_setup();
+        // Prima riga
+        lcd_set_cursor(0, 0);
+        float_to_string(counter, buffer, 3); // 3 decimali
+        lcd_write_string("Valore: ");
+        lcd_write_string(buffer);
 
-  //setup ultrasound sensor
-  hc_sr04_init();
+        // Seconda riga
+        lcd_set_cursor(1, 0);
+        lcd_write_string("Continuo...");
 
-  // ADC
-  ADC_init();
-
-  /* PID tuning and initialization START */
-
-  float tc = 0.09; // 70ms
-  float kp = 3.15f;    // moderate proportional
-  float ti = 8.0f;    // 1s integral time → removes steady-state error in a few seconds
-  float td = 0.001f;    // 1ms derivative time → gentle slope damping
-  float N  = 10.0f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
-  float tw = ti;      // back-calc time constant ≃ Ti (you can also try Ti/10)
-  float u_min = -65.0f;  // PWM min 720 -> 2160
-  float u_max = 65.0f;  // PWM max (assuming you scale from -65° to 65° which is servo angle )
-
-  Pid_s *pid = pid_create(tc, kp, ti, td, N, u_min, u_max, tw);
-
-  /* PID tuning and initialization END */
-
-  TIM3->CR1 |= (1 << TIM_CR1_CEN_Pos);
-
-  /*
-   * Set bar angle at 0°
-   */
-
-  TIM3->CCR1 = horizontal -1;
-
-  while (1)
-  {
-    /* USER CODE END WHILE */
-	  measure_f = meas_dist();	// take measurement
-	  if (fabs(measure_f-reference)>=0.01){
-		  uk = pid_calculate(pid, measure_f, reference);
-		  pwm = ((uk + 90) / 180) * 1440 + 720;
-		  TIM3->CCR1 = (uint32_t) pwm;
-	  }
-	  HAL_Delay(10);
-
-  }
+        counter += 0.125f; // Incrementa di 0.125
+        HAL_Delay(500); // Mezzo secondo
+    }
 }
 
 /**
