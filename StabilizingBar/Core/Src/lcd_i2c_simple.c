@@ -2,10 +2,6 @@
 #include "lcd_i2c_simple.h"
 #include <string.h> // Per strlen se necessario
 
-// --- Definisci indirizzi e pin --- //
-#define I2C1_BASE 0x40005400
-#define I2C1 ((I2C_TypeDef *) I2C1_BASE)
-
 #define LCD_ADDR (0x27 << 1)
 #define LCD_BACKLIGHT (1 << 3)
 
@@ -23,13 +19,17 @@ void i2c_write_byte(uint8_t data) {
 void i2c_start(uint8_t addr) {
     I2C1->CR1 |= I2C_CR1_START;
     i2c_wait_for_flag(I2C_SR1_SB);
+    // 0xFE è una maschera 11111110 (LSB=0)
     I2C1->DR = addr & 0xFE;
     i2c_wait_for_flag(I2C_SR1_ADDR);
+    // Clear ADDR flag solo leggendo
     (void) I2C1->SR2;
 }
 
 void i2c_stop(void) {
+	// invia tutti i byte
     i2c_wait_for_flag(I2C_SR1_BTF);
+    // alza stop
     I2C1->CR1 |= I2C_CR1_STOP;
 }
 

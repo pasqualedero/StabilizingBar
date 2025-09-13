@@ -283,7 +283,14 @@ int main(void) {
     SystemClock_Config();
     MX_GPIO_Init();
     MX_USART2_UART_Init();
+    //setup servo motor
+     TIM3_PWM_setup();
 
+     //setup ultrasound sensor
+     hc_sr04_init();
+
+     // ADC
+     ADC_init();
     lcd_init();
 
     float counter = 0.0f;
