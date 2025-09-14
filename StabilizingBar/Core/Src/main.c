@@ -1,78 +1,79 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "float.h"
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
+#include <math.h>
 #include "pid.h"
-/* USER CODE END Includes */
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
 #define LENGTH_MAX 32.0f
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
+#define HORIZONTAL 1440
+#define TOLERANCE 0.5f
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart2;
-static const uint32_t horizontal = 1440; // horizontal position servo-motor
-
-/* USER CODE BEGIN PV */
-
-/* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-/* USER CODE BEGIN PFP */
-
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-/* USER CODE END 0 */
 
 /**
   * @brief  The application entry point.
   * @retval int
   */
-#include <math.h>
 
+void GPIO_Init(){
+	// Clock
+	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOAEN_Pos);	// A
+	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOBEN_Pos); // B
+	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOCEN_Pos); // C
 
-void TIM3_PWM_setup() {
-	/* GPIO SetUp (PA6 -> TIM3_CH1) */
-	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOAEN_Pos);		// Enable GPIO6
+	// Pin PA6 mappato a canale 1 di TIM3 PWM
 	GPIOA->MODER |= (2 << 12); 							// Alternate function mode
 	GPIOA->AFR[0] = (2 << 24); 							// Alternate function n2 for PA6 (TIM3 CH1)
 	GPIOA->OSPEEDR 	|= (3 << 12);  						// High Speed for PIN PA6
+
+	// Pin PC0 e PC1 Trigger e Echo di sensore prossimità
+	GPIOC->MODER |= (0x01 << 0);  						// Set Output PC0 come Trigger (sta alto almeno 10 microsecondi appena si abbassa il sensore invia le onde)
+	GPIOC->OTYPER &= ~(0x1 << 0);					    // Push-Pull output
+	GPIOC->MODER  &= ~(0x03 << 2); 						// Set Input PC1 Echo ci serve leggere per quanto tempo rimane alto
+
+	// Pin PA0 per ADC
+	GPIOA->MODER |= (3 << GPIO_MODER_MODE0_Pos);        // Set PA0 in Analog mode
+
+	// Pin PB2 bottone di avvio
+	GPIOB->MODER &= ~(0x03 << 4);  // Imposta PB2 come input
+	GPIOB->PUPDR &= ~(0x03 << 4);  // Pulisce la config. precedente
+	GPIOB->PUPDR |= (0x01 << 4);   // Attiva il pull-up per PB2
+
+	// PB13 -> led rosso (parte acceso)
+	// PB14 -> led verde
+
+	// Reset Register
+	GPIOB->MODER  &= ~(0x03 << 26);
+	GPIOB->MODER  &= ~(0x03 << 28);
+
+	// Set come output
+	GPIOB->MODER  |= (1 << 26);
+	GPIOB->MODER  |= (1 << 28);
+
+	// Reset
+	GPIOB->PUPDR &= ~(0x03 << 26);
+	GPIOB->PUPDR &= ~(0x03 << 28);
+
+	// Set PD
+	GPIOB->PUPDR |= (2 << 24);
+	GPIOB->PUPDR |= (2 << 28);
+
+	GPIOB -> OTYPER &= ~(1 << 13);
+	GPIOB -> OTYPER &= ~(1 << 14);
+
+	GPIOB -> ODR |= (1 << 13);
+	GPIOB -> ODR |= (0 << 14);
+
+}
+
+//SETUP TIM 3 PWM (FOR SERVO MOTOR)
+void TIM3_PWM_setup() {
 
 	/* TIM3 SetUp */
 	RCC->APB1ENR |= (1 << RCC_APB1ENR_TIM3EN_Pos); 		// Clock to TIM3
@@ -97,9 +98,12 @@ void TIM3_PWM_setup() {
 
 	TIM3->EGR |= (1 << TIM_EGR_UG_Pos); 		// Fire an update event to update shadow registers
 }
+//END CONFIGURATION TIM3
 
+//ULTRASOUND CONFIGURATION (TIM6)
 volatile uint8_t time_elapsed = 0;
 uint16_t counter = 0;
+
 void TIM6_DAC_IRQHandler() {
 	if((TIM6->SR >> TIM_SR_UIF_Pos) & 0x01) { //se ha raggiunto il valore di ARR
 		NVIC_ClearPendingIRQ(TIM6_DAC_IRQn);
@@ -158,16 +162,6 @@ void delay_micro_s(uint16_t delay) {
 
 
 void hc_sr04_init() {
-	RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOCEN_Pos); //abilita il clock alla porta C
-
-	/** Trigger pin configuration **/
-	GPIOC->MODER |= (0x01 << 0);  // Set Output PC0 come Trigger (sta alto almeno 10 microsecondi
-	                              // appena si abbassa il sensore invia le onde)
-	// Push-Pull output
-	GPIOC->OTYPER &= ~(0x1 << 0);
-
-	/**Echo pin configuration **/
-	GPIOC->MODER  &= ~(0x03 << 2); // Set Input PC1 Echo ci serve leggere per quanto tempo rimane alto
 
 	/* SYStem ConFiGuration (Multiplexer) */
 	SYSCFG->EXTICR[0] |= (SYSCFG_EXTICR1_EXTI1_PC); //abilita l'EXTI su PC1 (0010: PC[1]) come sorgente esterna
@@ -197,17 +191,18 @@ float beta = 0.3f;
 float measure_filtered;
 int flag = 1;
 float measure_f_prec;
+
 float meas_dist() {
-	clear_triger(); 	// keep trigger low
-	delay_micro_s(3);	// for at least 3 mu_s
+	clear_triger(); 	// trigger low
+	delay_micro_s(3);	// per almeno 3 mu_s
 
-	set_triger();		// set trigger high
-	delay_micro_s(10);	// for at least 10 mu_s
-	clear_triger();		// clear trigger to start ultrasonic burst transmission
+	set_triger();		// trigger high
+	delay_micro_s(10);	// per almeno 10 mu_s
+	clear_triger();
 
-	while(!measure_collected);	// wait for measurement to be collected (look EXTI ISR) finche non
-	                            // legge per quanto tempo echo è stato alto
-	measure_f_prov = -0.5*0.0343*measure;		// return measurement in cm (twice speed of sound times echo rise time (measure))
+	while(!measure_collected);
+
+	measure_f_prov = -0.5*0.0343*measure;	// in cm
 
 	if (flag){
 		measure_f_prec = measure_f_prov;
@@ -217,45 +212,40 @@ float meas_dist() {
 
 	measure_filtered = measure_f_prov * beta + measure_f_prec * (1-beta); // implement Weight. Mov. Avg. Filter
 
-	measure_f_prec = measure_filtered; // for next time
+	measure_f_prec = measure_filtered;
 
 	return measure_filtered;
 
 }
 
-/*
- * ADC configuration
- */
+//END ULTRASOUND SETUP
 
+//ADC cONFIGURATION
 void ADC_init(){
-    // Set GPIOA
-    RCC->AHB1ENR |= (1 << RCC_AHB1ENR_GPIOAEN_Pos);     // Clock to GPIOA
-    GPIOA->MODER |= (3 << GPIO_MODER_MODE0_Pos);        // Set PA0 in Analog mode (correct)
-
     // ADC configuration
-    RCC->APB2ENR |= (1 << RCC_APB2ENR_ADC1EN_Pos);      // enable clock for ADC1
+    RCC->APB2ENR |= (1 << RCC_APB2ENR_ADC1EN_Pos);      // abilita clock per ADC1
 
     // Power on ADC first
     ADC1->CR2 |= (1 << ADC_CR2_ADON_Pos);
 
     // Configure ADC parameters
     ADC1->CR2 |= (1 << ADC_CR2_CONT_Pos);               // Continuous Conversion Mode
-    ADC1->CR1 |= (0x03 << ADC_CR1_RES_Pos);            // 12-bit resolution
+    ADC1->CR1 |= (0x03 << ADC_CR1_RES_Pos);             // 12-bit resolution
     ADC1->CR2 &= ~(1 << ADC_CR2_ALIGN_Pos);             // Right alignment
 
-    // Configure sequence: 1 conversion in regular sequence
-    ADC1->SQR1 &= ~ADC_SQR1_L_Msk;                      // 1 conversion
+    // Sequenza
+    ADC1->SQR1 &= ~ADC_SQR1_L_Msk;                      // 1 conversione
     ADC1->SQR3 = 0;                                     // Clear sequence register
-    ADC1->SQR3 = 0;                                     // Channel 0 in first position
+    ADC1->SQR3 = 0;                                     // Channel 0 in prima posizione
 
-    // Sample time configuration
-    ADC1->SMPR2 &= ~(0x07 << ADC_SMPR2_SMP0_Pos);       // Clear sampling time for channel 0
+    // Sample time config.
+    ADC1->SMPR2 &= ~(0x07 << ADC_SMPR2_SMP0_Pos);
     ADC1->SMPR2 |= (0x06 << ADC_SMPR2_SMP0_Pos);        // 480 cycles sampling time
 
-    // Interrupt configuration
-    ADC1->CR1 |= (1 << ADC_CR1_EOCIE_Pos);              // Enable end-of-conversion interrupt
+    // Interrupt config
+    ADC1->CR1 |= (1 << ADC_CR1_EOCIE_Pos);              // Abilitan EOC
 
-    // NVIC configuration
+    // NVIC config.
     NVIC_EnableIRQ(ADC_IRQn);
     NVIC_SetPriority(ADC_IRQn, 0);
 
@@ -269,17 +259,51 @@ void ADC_IRQHandler() {
     if (ADC1->SR & ADC_SR_EOC) {
         reference_pot = (uint16_t) ADC1->DR;
         reference = (float)reference_pot * (-LENGTH_MAX/pow(2,6));
-        ADC1->SR &= ~ADC_SR_EOC;  // Clear the interrupt flag
+        ADC1->SR &= ~ADC_SR_EOC;
     }
 }
+//END ADC CONFIGURATION
+
+// START BUTTON CONFIGURATION AND INTERRUPT
+void start_button() {
+    RCC->APB2ENR |= (1 << RCC_APB2ENR_SYSCFGEN_Pos); // clock per SYSCFG
+
+    SYSCFG->EXTICR[0] &= ~(0xF << 8);
+    SYSCFG->EXTICR[0] |= (0x01 << 8);
+
+    EXTI->IMR  |= (1 << 2);
+    EXTI->RTSR &= ~(1 << 2);  // Disabilita il fronte di salita
+    EXTI->FTSR |= (1 << 2);   // Abilita il fronte di discesa
+
+    NVIC_SetPriority(EXTI2_IRQn, 0);
+    NVIC_EnableIRQ(EXTI2_IRQn);
+}
+
+volatile int start = 0;
+
+void EXTI2_IRQHandler(void) {
+	NVIC_ClearPendingIRQ(EXTI2_IRQn);
+
+	start = 1;
+
+	GPIOB -> ODR |= (1 << 14);
+	GPIOB -> ODR &= ~(1 << 13);
+
+	EXTI->PR |= (1 << 2);
+
+}
+//END START BUTTON CONFIGURATION AND INTERRUPT
+
+
+// RED LED CONFIG.
 
 
 
 float measure_f;
 float uk;
 float pwm;
-int main(void)
-{
+
+int main(void){
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
@@ -292,50 +316,48 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
 
+  // GPIO
+  GPIO_Init();
   //setup servo motor
   TIM3_PWM_setup();
-
   //setup ultrasound sensor
   hc_sr04_init();
-
-  // ADC
+  // ADC initialization
   ADC_init();
+  //start button configuration
+  start_button();
 
   /* PID tuning and initialization START */
 
-  float tc = 0.09; // 70ms
-  float kp = 3.15f;    // moderate proportional
-  float ti = 8.0f;    // 1s integral time → removes steady-state error in a few seconds
-  float td = 0.001f;    // 1ms derivative time → gentle slope damping
-  float N  = 10.0f;   // filter pole → rolls off derivative above ~1/(Td/N)=100kHz
-  float tw = ti;      // back-calc time constant ≃ Ti (you can also try Ti/10)
+  float tc = 0.09;     // 90ms
+  float kp = 3.15f;
+  float ti = 8.0f;
+  float td = 0.001f;
+  float N  = 10.0f;
+  float tw = ti;
   float u_min = -65.0f;  // PWM min 720 -> 2160
-  float u_max = 65.0f;  // PWM max (assuming you scale from -65° to 65° which is servo angle )
+  float u_max = 65.0f;  // PWM max (scale from -65° to 65° which is servo angle )
 
   Pid_s *pid = pid_create(tc, kp, ti, td, N, u_min, u_max, tw);
 
   /* PID tuning and initialization END */
 
+  TIM3->CCR1 = HORIZONTAL - 1;
   TIM3->CR1 |= (1 << TIM_CR1_CEN_Pos);
 
-  /*
-   * Set bar angle at 0°
-   */
+  while(!start);
 
-  TIM3->CCR1 = horizontal -1;
-
-  while (1)
-  {
-    /* USER CODE END WHILE */
-	  measure_f = meas_dist();	// take measurement
-	  if (fabs(measure_f-reference)>=0.01){
+  while (1){
+	  measure_f = meas_dist();
+	  // Tolleranza di 0.5 cm
+	  if (fabs(measure_f-reference)>= TOLERANCE){
 		  uk = pid_calculate(pid, measure_f, reference);
 		  pwm = ((uk + 90) / 180) * 1440 + 720;
 		  TIM3->CCR1 = (uint32_t) pwm;
 	  }
 	  HAL_Delay(10);
-
   }
+
 }
 
 /**
@@ -364,8 +386,7 @@ void SystemClock_Config(void){
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
   RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK){
     Error_Handler();
   }
 
@@ -378,8 +399,7 @@ void SystemClock_Config(void){
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
     Error_Handler();
   }
 }
@@ -402,6 +422,7 @@ static void MX_USART2_UART_Init(void){
   {
     Error_Handler();
   }
+
 }
 
 /**
@@ -409,12 +430,8 @@ static void MX_USART2_UART_Init(void){
   * @param None
   * @retval None
   */
-static void MX_GPIO_Init(void)
-{
+static void MX_GPIO_Init(void){
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-
-  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -437,12 +454,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
-
-
 }
-
-
-
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
